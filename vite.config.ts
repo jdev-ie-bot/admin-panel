@@ -20,10 +20,9 @@ export default defineConfig(({ mode }) => {
             port: 5176,
             strictPort: true,
             proxy: Object.fromEntries(
-                ['/api/', '/auth/sso', '/storage/', '/img/'].map((path) => [
-                    path,
-                    { target, changeOrigin: false },
-                ]),
+                ['/api/', '/auth/', '/sanctum/', '/storage/', '/img/'].map(
+                    (path) => [path, { target, changeOrigin: false }],
+                ),
             ),
         },
     };

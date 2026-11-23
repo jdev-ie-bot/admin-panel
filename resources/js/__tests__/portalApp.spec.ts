@@ -19,7 +19,7 @@ vi.mock('@/lib/portalState', async (original) => ({
     refreshIdentity: vi.fn().mockResolvedValue(undefined),
 }));
 let wrapper: VueWrapper;
-async function start(component: any = PortalApp) {
+async function start(path = '/') {
     const router = createRouter({
         history: createMemoryHistory(),
         routes: [
@@ -29,9 +29,9 @@ async function start(component: any = PortalApp) {
             },
         ],
     });
-    await router.push('/');
+    await router.push(path);
     await router.isReady();
-    wrapper = mount(component, { global: { plugins: [router] } });
+    wrapper = mount(PortalApp, { global: { plugins: [router] } });
     await flushPromises();
 
     return router;
@@ -53,6 +53,35 @@ describe('portal session and navigation', () => {
         expect(wrapper.text()).not.toContain('Private member space');
         expect(wrapper.find('nav').exists()).toBe(false);
     });
+    it.each([
+        ['/admin?private=omitted#section', '/admin'],
+        ['/organisations/23?tab=members', '/organisations/23'],
+        ['/dashboard', '/dashboard'],
+        ['/elsewhere?return_to=other', null],
+    ] as const)(
+        'preserves only the approved return path from %s',
+        async (path, expected) => {
+            portalState.identity = null;
+            await start(path);
+            const link = new URL(
+                wrapper.get<HTMLAnchorElement>('a.portal-button').element.href,
+            );
+            expect(link.pathname).toBe('/auth/sso');
+            expect(link.searchParams.get('return_to')).toBe(expected);
+        },
+    );
+    it.each([
+        ['reconciliation', 'Contact BULSCA to link your existing account'],
+        ['failed', 'Sign-in could not be completed'],
+    ])(
+        'explains the %s callback outcome without rendering provider data',
+        async (outcome, message) => {
+            portalState.identity = null;
+            await start('/?auth=' + outcome + '&error=private-provider-detail');
+            expect(wrapper.get('[role=alert]').text()).toContain(message);
+            expect(wrapper.text()).not.toContain('private-provider-detail');
+        },
+    );
     it('shows members only their permitted navigation', async () => {
         await start();
         const navigation = wrapper.get('nav').text();

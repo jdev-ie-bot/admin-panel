@@ -18,7 +18,7 @@ A standalone Vue and TypeScript portal for organisation members and committees. 
 
 ## Shared backend and first use
 
-Use the organisation portal API from the paired `BULSCA/bulsca-site` change. Apply its normal migrations to introduce `portal_*` tables; legacy public committee biographies and club administrators are deliberately not imported as permissions. Configure the existing backend's SSO provider and registered callback, then sign in once. An operator explicitly grants the first account access with:
+Use the organisation portal API from the paired `BULSCA/bulsca-site` change. Apply its normal migrations to introduce `portal_*` tables; legacy public committee biographies and club administrators are deliberately not imported as permissions. Register the portal hostname’s `/auth/sso/callback` with Authentik and configure the shared backend with the matching issuer and client. Keep all client secrets on that backend. Sign in once through the portal. An operator explicitly grants the first account access with:
 
 ```sh
 # Run in the shared Laravel backend checkout.
@@ -28,6 +28,17 @@ php artisan portal:bootstrap-superadmin person@example.org
 The superadmin can add people to BULSCA's member space, create committee roles and appoint members. A club is created with an initial manager who can manage its own members, committees, restricted roles and branding. Everyone must sign in once before their registered email can be added; this release does not provision identity-provider accounts or send invitations. One person may belong to several organisations. BULSCA membership alone grants no authority over clubs: the explicit `clubs.manage` permission does. Only the existing global `super_admin` role grants root access.
 
 Permissions apply during inclusive committee dates in Europe/London, while the membership and appointment remain active. Ending membership revokes appointments. Reactivation requires explicit appointments to restore powers. Appoint a replacement current manager before removing the final manager. Schedule a handover before a term expires; a superadmin can recover access. Protected manager roles cannot be edited, and roles with appointment history cannot be deleted. The backend checks every action independently of the browser controls.
+
+### Reconcile existing prototype accounts
+
+In the retained Laravel prototype, point its database connection at the historical portal database using a read-only account. Confirm the exact issuer that issued its stored Authentik subject IDs. Export only the original portal ID, subject and email into an operator-only directory outside the repository. Missing subjects are retained for review.
+
+```sh
+umask 077
+php artisan authentik:inventory 'https://auth.example.org/application/o/portal/' --no-ansi > portal-accounts.json
+```
+
+In the shared backend checkout run `php artisan authentik:reconcile /path/to/portal-accounts.json` for a dry run. Review missing or ambiguous identities and the intended backend user IDs before any explicit mapping import. The export contains personal data. Keep it out of Git, tickets and CI logs, and remove it when reconciliation is complete.
 
 ## Local development
 
@@ -46,7 +57,7 @@ Vite serves the portal at `http://127.0.0.1:5176`. Run the shared Laravel backen
 | `VITE_BACKEND_ORIGIN` | `http://127.0.0.1:8000` (development proxy target) |
 | `VITE_PUBLIC_SITE_URL` | `https://www.bulsca.co.uk` |
 
-The development proxy forwards `/api/`, `/auth/sso` and its callback, `/storage/` and `/img/` to the shared backend, retaining session cookies and request methods. Vue routes include `/`, `/dashboard`, `/admin` and `/organisations/:id`. Refreshing a deep link must serve the SPA entry point.
+The portal reads identity from `/api/v1/me` and sends the browser to `/auth/sso?portal=1` for Authentik sign-in. Approved dashboard, admin and organisation paths can be resumed after login. Writes use the cookie from `/sanctum/csrf-cookie`, including `POST /api/v1/portal/logout`. The development proxy forwards `/api/`, `/auth/`, `/sanctum/`, `/storage/` and `/img/` to the shared backend, retaining session cookies and request methods. Vue routes include `/`, `/dashboard`, `/admin` and `/organisations/:id`. Refreshing a deep link must serve the SPA entry point.
 
 The earlier Laravel 13/Inertia prototype remains available through `npm run dev:legacy` and `vite.inertia.config.ts` for reference and compatibility tests. Its Authentik settings and PHP routes do not authenticate the standalone portal. `npm run dev` now selects the standalone entry; production serving of the existing legacy portal is unchanged until an explicit deployment cutover. Do not run two authoritative authentication/membership backends.
 
@@ -59,13 +70,17 @@ npm run types:check
 npm run test:run
 ```
 
-The retained prototype's generated route helpers are needed for the repository-wide type check. With its PHP dependencies installed, run `php artisan wayfinder:generate --with-form --skip-routes` first. `composer lint:check` and `vendor/bin/phpunit` continue to verify that prototype using in-memory SQLite. New permission and SSO tests live in the authoritative backend's guarded MySQL suite; Vue tests here cover API/CSRF behaviour, private navigation, dashboard failures, membership and committee forms, roles, branding and stale responses. External identity providers are faked for tests.
+The retained prototype's generated route helpers are needed for the repository-wide type check. With its PHP dependencies installed, run `php artisan wayfinder:generate --with-form --skip-routes` first. `composer lint:check` and `vendor/bin/phpunit` continue to verify that prototype using in-memory SQLite. New permission and SSO tests live in the authoritative backend's guarded MySQL suite; Vue tests here cover API/CSRF behaviour, private navigation, dashboard failures, membership and committee forms, roles, branding and stale responses. The browser acceptance test starts Vite, Laravel, Chromium and a loopback Authentik test provider. It exercises sign-in and sign-out, real club membership changes, club-scoped access and CSRF enforcement. Install the portal and shared backend development dependencies first, install Python Playwright (version pinned in the workflow), then set `CHROME_BIN` if Chromium is outside your path. Set `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD` for an isolated local MySQL database ending in `_test`. Run from the portal checkout:
+
+```sh
+python3 tests/browser/portal_acceptance.py ../bulsca-site
+```
 
 `.github/workflows/tests.yml` runs checks on every PR, default/release push and merge queue. The `Required CI` gate must pass before merging to protected default/release branches. Checks do not build assets or containers, run production migrations or deploy.
 
 ## Deployment boundary and privacy
 
-The owner performs deployment verification. The existing release container still serves the legacy portal. To cut over to this SPA, serve its static entry/deep links on the portal hostname and reverse-proxy its API, SSO and media paths to the shared backend. Keep the browser same-origin: do not send private API requests through the public website's cookie-stripping proxy. Configure `APP_URL`/the SSO callback on the portal hostname, `PUBLIC_API_URL` on the public API hostname and secure, host-scoped production cookies. Review and explicitly onboard existing committee members before switching over. Asset/container builds and that cutover have not been performed as part of this change.
+The owner performs deployment verification. The existing release container still serves the legacy portal. To cut over to this SPA, serve its static entry/deep links on the portal hostname and reverse-proxy its API, SSO, Sanctum and media paths to the shared backend. Keep the browser same-origin: do not send private API requests through the public website's cookie-stripping proxy. Configure `APP_URL`/the SSO callback on the portal hostname, `PUBLIC_API_URL` on the public API hostname and secure, host-scoped production cookies. Review and explicitly onboard existing committee members before switching over. Asset/container builds and that cutover have not been performed as part of this change.
 
 The portal uses essential backend session/CSRF cookies, with no analytics or local-storage identity cache. Diagnostic reports use the existing backend endpoint without credentials and contain fixed error categories and route templates, never raw exception text, names, email addresses, queries, tokens or form values. Reports are deduplicated and capped per page. Private responses are not cached; expiry removes private content. Administration audit records retain only action codes, actor/record IDs and permitted change metadata, and are pruned after 90 days by the backend scheduler. Confirm access and retention settings as part of deployment.
 

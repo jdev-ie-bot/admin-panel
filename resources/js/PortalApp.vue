@@ -1,15 +1,25 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { RouterLink, RouterView } from 'vue-router';
+import { RouterLink, RouterView, useRoute } from 'vue-router';
 import PortalBoundary from '@/components/portal/PortalBoundary.vue';
 import PortalNotice from '@/components/portal/PortalNotice.vue';
 import { portalRequest } from '@/lib/portalApi';
-import { portalState, refreshIdentity } from '@/lib/portalState';
+import { clearIdentity, portalState, refreshIdentity } from '@/lib/portalState';
 
 const signingOut = ref(false);
 const logoutError = ref('');
-const authenticationFailed =
-    new URLSearchParams(window.location.search).get('auth') === 'failed';
+const sessionExpired = ref(false);
+const route = useRoute();
+const signInUrl = computed(() => {
+    const path = route.path;
+    const permitted = /^\/(dashboard|admin|organisations\/[1-9]\d*)$/.test(
+        path,
+    );
+
+    return permitted
+        ? '/auth/sso?portal=1&return_to=' + encodeURIComponent(path)
+        : '/auth/sso?portal=1';
+});
 const canManageClubs = computed(
     () =>
         portalState.identity?.is_superadmin ||
@@ -18,7 +28,8 @@ const canManageClubs = computed(
         ),
 );
 function expired() {
-    portalState.identity = null;
+    sessionExpired.value ||= portalState.identity !== null;
+    clearIdentity();
 }
 onMounted(() => {
     window.addEventListener('portal-session-expired', expired);
@@ -37,7 +48,7 @@ async function logout() {
 
     try {
         await portalRequest('/logout', { method: 'POST' });
-        portalState.identity = null;
+        clearIdentity();
     } catch {
         logoutError.value = 'We could not confirm sign out. Please try again.';
     } finally {
@@ -87,12 +98,17 @@ async function logout() {
             <p>
                 Sign in to access your clubs, committees and organisation roles.
             </p>
-            <p v-if="authenticationFailed" role="alert">
+            <p v-if="route.query.auth === 'reconciliation'" role="alert">
+                Contact BULSCA to link your existing account before signing in
+                again.
+            </p>
+            <p v-else-if="route.query.auth === 'failed'" role="alert">
                 Sign-in could not be completed. Please try again.
             </p>
-            <a class="portal-button" href="/auth/sso?portal=1"
-                >Sign in with BULSCA</a
-            >
+            <p v-else-if="sessionExpired" role="alert">
+                Your session has ended. Please sign in again.
+            </p>
+            <a class="portal-button" :href="signInUrl">Sign in with BULSCA</a>
             <p>
                 Membership is assigned by BULSCA or your club committee after
                 your first sign-in.

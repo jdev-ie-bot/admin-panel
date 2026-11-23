@@ -1,5 +1,5 @@
 import { reactive } from 'vue';
-import { portalRequest } from '@/lib/portalApi';
+import { fetchPortalIdentity } from '@/lib/portalApi';
 import { readIdentity } from '@/lib/portalData';
 import type { PortalIdentity } from '@/types/portal';
 
@@ -8,7 +8,22 @@ export const portalState = reactive<{
     loading: boolean;
     error: string | null;
 }>({ identity: null, loading: true, error: null });
+
+let activeRead: AbortController | undefined;
+
+export function clearIdentity() {
+    activeRead?.abort();
+    activeRead = undefined;
+    portalState.identity = null;
+    portalState.loading = false;
+    portalState.error = null;
+}
+
 export async function refreshIdentity(background = false) {
+    activeRead?.abort();
+    const read = new AbortController();
+    activeRead = read;
+
     if (!background) {
         portalState.loading = true;
     }
@@ -16,9 +31,16 @@ export async function refreshIdentity(background = false) {
     portalState.error = null;
 
     try {
-        const identity = readIdentity(await portalRequest<unknown>('/me'));
-        portalState.identity = identity;
+        const identity = readIdentity(await fetchPortalIdentity(read.signal));
+
+        if (!read.signal.aborted) {
+            portalState.identity = identity;
+        }
     } catch (error) {
+        if (read.signal.aborted) {
+            return;
+        }
+
         portalState.identity = null;
 
         if (
@@ -29,6 +51,9 @@ export async function refreshIdentity(background = false) {
                 'We could not load your portal account. Please try again.';
         }
     } finally {
-        portalState.loading = false;
+        if (activeRead === read) {
+            activeRead = undefined;
+            portalState.loading = false;
+        }
     }
 }

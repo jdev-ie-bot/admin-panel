@@ -9,7 +9,7 @@
 
 ## Start here
 
-Read README.md for setup, onboarding and deployment boundaries. The organisation feature is paired with backend branch `CODEX/organisation-memberships`; the portal feature branch is `CODEX/organisation-portal`.
+Read README.md for setup, onboarding and deployment boundaries. The Authentik change uses paired `CODEX/authentik-members` branches. The CI workflow records the matching backend commit.
 
 | Concern | Source |
 | --- | --- |
@@ -35,6 +35,6 @@ Read README.md for setup, onboarding and deployment boundaries. The organisation
 
 Use Node 24. Run `npm run lint:check`, `npm run format:check`, `npm run types:check` and `npm run test:run`. The repository-wide type check also includes retained prototype components: with PHP dependencies installed, generate their ignored helpers using `php artisan wayfinder:generate --with-form --skip-routes`. Prototype checks are `composer lint:check` and `vendor/bin/phpunit` on in-memory SQLite. CI runs these and gates merges through `Required CI` without building assets.
 
-The current feature has unit/component coverage plus backend permission/SSO feature tests. Full browser acceptance against the shared backend, real SSO configuration and the standalone production serving/cutover still need verification. No incomplete browser test runner is shipped. When asked to continue, start with a bounded local browser test of sign-in, role-specific navigation and one complete club-management journey; follow the backend test database guard. This is a verification gap, not permission to deploy.
+The portal browser test in `tests/browser/portal_acceptance.py` exercises the shared Laravel backend with a loopback Authentik provider. See README for setup. Real provider configuration, representative data and serving the standalone SPA remain staging checks for the owner.
 
 Email invitation delivery, identity-provider account provisioning, migration of legacy club administrators and new competition/content editing permissions are outside this feature. Do not assume they exist. People must sign in once before a manager adds their registered email.

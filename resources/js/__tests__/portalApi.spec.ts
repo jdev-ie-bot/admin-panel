@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+    fetchPortalIdentity,
     PortalError,
     portalRequest,
     publicData,
@@ -22,6 +23,18 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 describe('private API requests', () => {
+    it('reads identity from the shared backend without caching', async () => {
+        fetcher.mockResolvedValue(json({ data: { user: { id: 3 } } }));
+        expect(await fetchPortalIdentity()).toEqual({ user: { id: 3 } });
+        expect(fetcher).toHaveBeenCalledOnce();
+        expect(fetcher).toHaveBeenCalledWith(
+            '/api/v1/me',
+            expect.objectContaining({
+                credentials: 'same-origin',
+                cache: 'no-store',
+            }),
+        );
+    });
     it('reads without CSRF or caching and uses only same-origin credentials', async () => {
         fetcher.mockResolvedValue(json({ data: { id: 2 } }));
         expect(await portalRequest('/organisations/2')).toEqual({ id: 2 });
@@ -45,6 +58,14 @@ describe('private API requests', () => {
             body: { name: 'Captain', permissions: [] },
         });
         expect(fetcher).toHaveBeenCalledTimes(2);
+        expect(fetcher).toHaveBeenNthCalledWith(
+            1,
+            '/sanctum/csrf-cookie',
+            expect.objectContaining({
+                credentials: 'same-origin',
+                cache: 'no-store',
+            }),
+        );
         expect(fetcher.mock.calls[1][1]).toMatchObject({
             method: 'POST',
             headers: {
@@ -105,7 +126,9 @@ describe('private API requests', () => {
             fetcher.mockResolvedValue(
                 json({ message: 'private provider text' }, status),
             );
-            await expect(portalRequest('/me')).rejects.toThrow('sign in again');
+            await expect(fetchPortalIdentity()).rejects.toThrow(
+                'sign in again',
+            );
             expect(listener).toHaveBeenCalledOnce();
             expect(reportPortalError).not.toHaveBeenCalled();
             window.removeEventListener('portal-session-expired', listener);
@@ -138,7 +161,7 @@ describe('private API requests', () => {
                 'X-Request-ID': requestId,
             }),
         );
-        await expect(portalRequest('/me')).rejects.toMatchObject({
+        await expect(fetchPortalIdentity()).rejects.toMatchObject({
             status: 500,
             requestId,
             message: expect.not.stringContaining('secret'),
@@ -152,7 +175,7 @@ describe('private API requests', () => {
     });
     it('turns successful HTML or a missing envelope into a recoverable error', async () => {
         fetcher.mockResolvedValue(new Response('<html>proxy error</html>'));
-        await expect(portalRequest('/me')).rejects.toBeInstanceOf(PortalError);
+        await expect(fetchPortalIdentity()).rejects.toBeInstanceOf(PortalError);
         expect(reportPortalError).toHaveBeenCalledWith(
             'invalid_response',
             '/me',
@@ -162,9 +185,9 @@ describe('private API requests', () => {
         const controller = new AbortController();
         controller.abort();
         fetcher.mockRejectedValue(new DOMException('Aborted', 'AbortError'));
-        await expect(
-            portalRequest('/me', { signal: controller.signal }),
-        ).rejects.toThrow('Aborted');
+        await expect(fetchPortalIdentity(controller.signal)).rejects.toThrow(
+            'Aborted',
+        );
         expect(reportPortalError).not.toHaveBeenCalled();
     });
     it('fetches public dashboard sections without credentials', async () => {

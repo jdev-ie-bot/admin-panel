@@ -33,9 +33,23 @@ function fields(value: unknown): Record<string, string[]> {
             .slice(0, 30),
     );
 }
-export async function portalRequest<T>(
+type RequestOptions = { method?: string; body?: unknown; signal?: AbortSignal };
+
+export function fetchPortalIdentity(signal?: AbortSignal): Promise<unknown> {
+    return privateRequest('/api/v1', '/me', { signal });
+}
+
+export function portalRequest<T>(
     path: string,
-    options: { method?: string; body?: unknown; signal?: AbortSignal } = {},
+    options: RequestOptions = {},
+): Promise<T> {
+    return privateRequest(base, path, options);
+}
+
+async function privateRequest<T>(
+    apiBase: string,
+    path: string,
+    options: RequestOptions,
 ): Promise<T> {
     const method = options.method || 'GET';
     const headers: Record<string, string> = { Accept: 'application/json' };
@@ -43,13 +57,17 @@ export async function portalRequest<T>(
 
     try {
         if (method !== 'GET') {
-            const csrf = await fetch(base + '/csrf', {
+            const csrf = await fetch('/sanctum/csrf-cookie', {
                 credentials: 'same-origin',
                 cache: 'no-store',
                 signal: AbortSignal.timeout(10000),
             });
 
             if (!csrf.ok) {
+                if ([401, 419].includes(csrf.status)) {
+                    window.dispatchEvent(new Event('portal-session-expired'));
+                }
+
                 throw new PortalError(
                     csrf.status,
                     'Secure form setup failed. Refresh the page and try again.',
@@ -61,6 +79,8 @@ export async function portalRequest<T>(
                 .find((value) => value.startsWith('XSRF-TOKEN='));
 
             if (!cookie) {
+                window.dispatchEvent(new Event('portal-session-expired'));
+
                 throw new PortalError(
                     419,
                     'Cookies are required to save securely. Sign in again.',
@@ -78,7 +98,7 @@ export async function portalRequest<T>(
             headers['Content-Type'] = 'application/json';
         }
 
-        response = await fetch(base + path, {
+        response = await fetch(apiBase + path, {
             method,
             headers,
             credentials: 'same-origin',
